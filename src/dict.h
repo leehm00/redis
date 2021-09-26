@@ -45,13 +45,13 @@
 #define DICT_ERR 1
 
 typedef struct dictEntry {
-    void *key;
+    void *key;//键
     union {
         void *val;
         uint64_t u64;
         int64_t s64;
         double d;
-    } v;
+    } v;//值
     struct dictEntry *next;     /* Next entry in the same hash bucket. */
     void *metadata[];           /* An arbitrary number of bytes (starting at a
                                  * pointer-aligned address) of size as returned
@@ -61,32 +61,42 @@ typedef struct dictEntry {
 typedef struct dict dict;
 
 typedef struct dictType {
-    uint64_t (*hashFunction)(const void *key);
-    void *(*keyDup)(dict *d, const void *key);
-    void *(*valDup)(dict *d, const void *obj);
-    int (*keyCompare)(dict *d, const void *key1, const void *key2);
-    void (*keyDestructor)(dict *d, void *key);
-    void (*valDestructor)(dict *d, void *obj);
+    uint64_t (*hashFunction)(const void *key);//计算哈希值的函数
+    //深拷贝，不仅仅是传递对象指针
+    void *(*keyDup)(dict *d, const void *key);// 复制键的函数
+    void *(*valDup)(dict *d, const void *obj);// 复制值的函数
+    int (*keyCompare)(dict *d, const void *key1, const void *key2);// 对比键的函数,根据key查找时可能用到
+    void (*keyDestructor)(dict *d, void *key);// 销毁键的函数
+    void (*valDestructor)(dict *d, void *obj);// 销毁值的函数
     int (*expandAllowed)(size_t moreMem, double usedRatio);
     /* Allow a dictEntry to carry extra caller-defined metadata.  The
      * extra memory is initialized to 0 when a dictEntry is allocated. */
-    size_t (*dictEntryMetadataBytes)(dict *d);
+    size_t (*dictEntryMetadataBytes)(dict *d);// metadata大小
 } dictType;
 
 #define DICTHT_SIZE(exp) ((exp) == -1 ? 0 : (unsigned long)1<<(exp))
 #define DICTHT_SIZE_MASK(exp) ((exp) == -1 ? 0 : (DICTHT_SIZE(exp))-1)
-
+//字典本身
 struct dict {
-    dictType *type;
-
-    dictEntry **ht_table[2];
+    dictType *type;//类型函数
+    /*dictEntry指针数组（table）。
+    key的哈希值最终映射到这个数组的某个位置上（对应一个bucket）。
+    如果多个key映射到同一个位置，就发生了冲突，那么就拉出一个dictEntry链表。
+    只有在重哈希的过程中，ht_table[0]和ht_table[1]才都有效。
+    而在平常情况下，只有ht_table[0]有效，ht_table[1]里面没有任何数据。*/
+    dictEntry **ht_table[2];//hash表
+    /*记录dict中现有的数据个数。
+    它与size的比值就是装载因子（load factor）。
+    这个比值越大，哈希值冲突概率越高。*/
     unsigned long ht_used[2];
-
+    // rehash 索引
+    // 当 rehash 不在进行时，值为 -1,它的值记录了当前重哈希进行到哪一步了
     long rehashidx; /* rehashing not in progress if rehashidx == -1 */
 
     /* Keep small vars at end for optimal (minimal) struct padding */
-    int16_t pauserehash; /* If >0 rehashing is paused (<0 indicates coding error) */
-    signed char ht_size_exp[2]; /* exponent of size. (size = 1<<exp) */
+    /* If >0 rehashing is paused (<0 indicates coding error) */
+    int16_t pauserehash; //大于0表示rehash计算停止,小于0编码错误
+    signed char ht_size_exp[2]; /* 记录大小的次方,exponent of size. (size = 1<<exp) */
 };
 
 /* If safe is set to 1 this is a safe iterator, that means, you can call
