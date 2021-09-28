@@ -100,6 +100,10 @@ static inline size_t sdsTypeMaxSize(char type) {
  * You can print the string with printf() as there is an implicit \0 at the
  * end of the string. However the string is binary safe and can contain
  * \0 characters in the middle, as the length is stored in the sds header. */
+/*
+sdsnewlen创建一个长度为initlen的sds字符串,
+并使用init指向的字符数组（任意二进制数据）来初始化数据
+*/
 sds _sdsnewlen(const void *init, size_t initlen, int trymalloc) {
     void *sh;
     sds s;
@@ -191,6 +195,8 @@ sds sdsdup(const sds s) {
 }
 
 /* Free an sds string. No operation is performed if 's' is NULL. */
+// 内存要整体释放，所以要先计算出header起始指针，
+// 把它传给s_free函数。这个指针也正是在sdsnewlen中调用s_malloc返回的那个地址
 void sdsfree(sds s) {
     if (s == NULL) return;
     s_free((char*)s-sdsHdrSize(s[-1]));
@@ -236,6 +242,9 @@ void sdsclear(sds s) {
  *
  * Note: this does not change the *length* of the sds string as returned
  * by sdslen(), but only the free buffer space we have. */
+//追加数据的时候先调用sdsMakeRoomFor来保证字符串s有足够的空间来追加长度为len的数据
+//当greedy为1时,分配的空间比请求的空间要大,准备以后可能的继续追加
+//当greedy为0时,只刚好分配请求的空间大小
 sds _sdsMakeRoomFor(sds s, size_t addlen, int greedy) {
     void *sh, *newsh;
     size_t avail = sdsavail(s);
@@ -243,7 +252,7 @@ sds _sdsMakeRoomFor(sds s, size_t addlen, int greedy) {
     char type, oldtype = s[-1] & SDS_TYPE_MASK;
     int hdrlen;
     size_t usable;
-
+    //原来字符串空间够用,直接返回
     /* Return ASAP if there is enough space left. */
     if (avail >= addlen) return s;
 
@@ -267,11 +276,12 @@ sds _sdsMakeRoomFor(sds s, size_t addlen, int greedy) {
 
     hdrlen = sdsHdrSize(type);
     assert(hdrlen + newlen + 1 > len);  /* Catch size_t overflow */
-    if (oldtype==type) {
+    if (oldtype==type) {//header一样的话在原来的地址上面分配
         newsh = s_realloc_usable(sh, hdrlen+newlen+1, &usable);
         if (newsh == NULL) return NULL;
         s = (char*)newsh+hdrlen;
     } else {
+        //header类型也变了,必须要对整个字符串空间重新分配
         /* Since the header size changes, need to move the string forward,
          * and can't use realloc */
         newsh = s_malloc_usable(hdrlen+newlen+1, &usable);

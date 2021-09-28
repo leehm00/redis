@@ -32,19 +32,37 @@
 
 #ifndef __SDS_H
 #define __SDS_H
-
+//最大预分配长度
 #define SDS_MAX_PREALLOC (1024*1024)
 extern const char *SDS_NOINIT;
 
 #include <sys/types.h>
 #include <stdarg.h>
 #include <stdint.h>
-
+//类型别名,用于指向sdshdr的buf属性
 typedef char *sds;
 
+//一共五种长度的header
+// //不同长度的字符串可以使用不同大小的header
+// len: 表示字符串的真正长度（不包含NULL结束符在内）。
+// alloc: 表示字符串的最大容量（不包含最后多余的那个字节）。
+// flags: 总是占用一个字节。其中的最低3个bit用来表示header的类型。
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
  * However is here to document the layout of type 5 SDS strings. */
+/*//定义该属性,让编译器以紧凑模式来分配内存
+// 如果没有这个属性，编译器可能会为struct的字段做优化对齐，
+// 在其中填充空字节。那样的话，就不能保证header和sds的数据部分紧紧前后相邻，
+// 也不能按照固定向低地址方向偏移1个字节的方式来获取flags字段
+*/
+/*
+在各个header的定义中最后有一个char buf[]。
+我们注意到这是一个没有指明长度的字符数组，这是C语言中定义字符数组的一种特殊写法，
+它在这里只是起到一个标记的作用，表示在flags字段后面就是一个字符数组。
+而程序在为header分配的内存的时候，它并不占用内存空间。
+如果计算sizeof(struct sdshdr16)的值，那么结果是5个字节，其中没有buf字段。
+*/
 struct __attribute__ ((__packed__)) sdshdr5 {
+    //没有alloc字段,长度使用alloc的高五位来存储,适合存储短小的字符串
     unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
     char buf[];
 };
@@ -80,13 +98,23 @@ struct __attribute__ ((__packed__)) sdshdr64 {
 #define SDS_TYPE_64 4
 #define SDS_TYPE_MASK 7
 #define SDS_TYPE_BITS 3
+//#符是把传递过来的参数当成字符串进行替代
+//##表示连接符号,用来将两个Token连接为一个Token。
+//这里连接的对象是Token就行，而不一定是宏的变量
+//这里使用的前面的token是sdshdr,T是一个数字:5,8,16,32,64
+//合起来表示了一种类型的
 #define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T)));
+//用于获得header起始位置的指针(提前需要了解是哪一种header,用T传递)
+//由sds字符指针获得header类型的方法是，先向低地址方向偏移1个字节的位置，得到flags字段。
+//根据header指针能很快确认sds的基本信息(包括len和alloc)
 #define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T))))
-#define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
+#define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)//直接确定sdsddr5的长度
 
 static inline size_t sdslen(const sds s) {
+    //先用s[-1]向低地址方向偏移1个字节，得到flags
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
+        //先得到header类型,根据类型确定之后对于header位置的操作
         case SDS_TYPE_5:
             return SDS_TYPE_5_LEN(flags);
         case SDS_TYPE_8:
