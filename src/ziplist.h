@@ -42,20 +42,33 @@ typedef struct {
     /* When integer is used, 'sval' is NULL, and lval holds the value. */
     long long lval;
 } ziplistEntry;
+//ziplist的数据类型，没有用自定义的struct之类的来表达，
+//而就是简单的unsigned char *。
+//这是因为ziplist本质上就是一块连续内存，
+//内部组成结构又是一个高度动态的设计（变长编码），也没法用一个固定的数据结构来表达。
 
-unsigned char *ziplistNew(void);
-unsigned char *ziplistMerge(unsigned char **first, unsigned char **second);
+unsigned char *ziplistNew(void);//创建新的ziplist,只包含<zlbytes><zltail><zllen><zlend>
+unsigned char *ziplistMerge(unsigned char **first, unsigned char **second);//将两个ziplist合并成一个新的ziplist
+//在ziplist头部或者尾部插入数据,
+//返回值是新的ziplist
+//调用方必须用这里返回的新的ziplist，替换之前传进来的旧的ziplist变量，而经过这个函数处理之后，原来旧的ziplist变量就失效了
+//因为ziplist是一块连续空间，对它的追加操作，会引发内存的realloc，因此ziplist的内存位置可能会发生变化
 unsigned char *ziplistPush(unsigned char *zl, unsigned char *s, unsigned int slen, int where);
+//index参数指定的数据项的内存位置。index可以是负数，表示从尾端向前进行索引
 unsigned char *ziplistIndex(unsigned char *zl, int index);
+//以下两个函数返回指定数据项p的后一项和前一项
 unsigned char *ziplistNext(unsigned char *zl, unsigned char *p);
 unsigned char *ziplistPrev(unsigned char *zl, unsigned char *p);
 unsigned int ziplistGet(unsigned char *p, unsigned char **sval, unsigned int *slen, long long *lval);
+//在指定数据项前插入
 unsigned char *ziplistInsert(unsigned char *zl, unsigned char *p, unsigned char *s, unsigned int slen);
 unsigned char *ziplistDelete(unsigned char *zl, unsigned char **p);
 unsigned char *ziplistDeleteRange(unsigned char *zl, int index, unsigned int num);
 unsigned char *ziplistReplace(unsigned char *zl, unsigned char *p, unsigned char *s, unsigned int slen);
 unsigned int ziplistCompare(unsigned char *p, unsigned char *s, unsigned int slen);
+//查找给定的数据,参数skip用于hash查找,奇数索引表示value,偶数索引表示key,需要跳过
 unsigned char *ziplistFind(unsigned char *zl, unsigned char *p, unsigned char *vstr, unsigned int vlen, unsigned int skip);
+//包含数据项个数
 unsigned int ziplistLen(unsigned char *zl);
 size_t ziplistBlobLen(unsigned char *zl);
 void ziplistRepr(unsigned char *zl);

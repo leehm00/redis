@@ -179,7 +179,20 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
+//ziplist是一个经过特殊编码的双向链表，它的设计目标就是为了提高存储效
+//ziplist可以用于存储字符串或整数，其中整数是按真正的二进制表示进行编码的，
+//而不是编码成字符串序列。
+//它能以O(1)的时间复杂度在表的两端提供push和pop操作。
+/*
+普通的双向链表，链表中每一项都占用独立的一块内存，各项之间用地址指针（或引用）连接起来
+这种方式会带来大量的内存碎片，而且地址指针也会占用额外的内存
+*/
+/*
+ziplist却是将表中每一项存放在前后连续的地址空间内
+一个ziplist整体占用一大块内存
+它是一个表（list），但其实不是一个链表（linked list）
+*/
+//一般使用变长存储,不同大小的对象存储的大小不同
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -911,6 +924,9 @@ unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int
 }
 
 /* Insert item at "p". */
+//插入后形成一个新的数据项，占据原来p的配置，原来位于p位置的数据项以及后面的所有数据项，需要统一向后移动，给新插入的数据项留出空间
+//类似于c中的数组的实现
+//参数p指向的是ziplist中某一个数据项的起始位置，或者在向尾端插入的时候，它指向ziplist的结束标记<zlend>
 unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned char *s, unsigned int slen) {
     size_t curlen = intrev32ifbe(ZIPLIST_BYTES(zl)), reqlen, newlen;
     unsigned int prevlensize, prevlen = 0;
@@ -921,7 +937,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
                                     that is easy to see if for some reason
                                     we use it uninitialized. */
     zlentry tail;
-
+//计算待插入前一个位置的数据线长度prevlen
     /* Find out prevlen for the entry that is inserted. */
     if (p[0] != ZIP_END) {
         ZIP_DECODE_PREVLEN(p, prevlensize, prevlen);
@@ -931,7 +947,8 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
             prevlen = zipRawEntryLengthSafe(zl, curlen, ptail);
         }
     }
-
+//计算当前数据项占用的总字节数reqlen，它包含三部分：<prevrawlen>, <len>和真正的数据。
+//其中的数据部分会通过调用zipTryEncoding先来尝试转成整数。
     /* See if the entry can be encoded */
     if (zipTryEncoding(s,slen,&value,&encoding)) {
         /* 'encoding' is set to the appropriate integer encoding */
@@ -941,6 +958,8 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
          * string length to figure out how to encode it. */
         reqlen = slen;
     }
+    //新增的内存需求包括待插入数据项reqlen,
+    //还有原来p位置的数据项（现在要排在待插入数据项之后）的<prevrawlen>字段(记录前一项数据长度)的变化
     /* We need space for both the length of the previous entry and
      * the length of the payload. */
     reqlen += zipStorePrevEntryLength(NULL,prevlen);
@@ -950,6 +969,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
      * make sure that the next entry can hold this entry's length in
      * its prevlen field. */
     int forcelarge = 0;
+    //计算原来p处的prevrawlen这个数据的长度的变化,如果是结尾就不变
     nextdiff = (p[0] != ZIP_END) ? zipPrevLenByteDiff(p,reqlen) : 0;
     if (nextdiff == -4 && reqlen < 4) {
         nextdiff = 0;
@@ -959,9 +979,12 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
     /* Store offset because a realloc may change the address of zl. */
     offset = p-zl;
     newlen = curlen+reqlen+nextdiff;
+    //重新调整大小
     zl = ziplistResize(zl,newlen);
     p = zl+offset;
-
+//额外的空间有了，接下来就是将原来p位置的数据项以及后面的所有数据都向后挪动，
+//并为它设置新的<prevrawlen>字段。
+//此外，还可能需要调整ziplist的<zltail>字段
     /* Apply memory move when necessary and update tail offset. */
     if (p[0] != ZIP_END) {
         /* Subtract one because of the ZIP_END bytes */
@@ -997,7 +1020,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
         zl = __ziplistCascadeUpdate(zl,p+reqlen);
         p = zl+offset;
     }
-
+//写入新的待插入项
     /* Write the entry */
     p += zipStorePrevEntryLength(p,prevlen);
     p += zipStoreEntryEncoding(p,encoding,slen);
