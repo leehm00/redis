@@ -31,10 +31,16 @@
 #ifndef __INTSET_H
 #define __INTSET_H
 #include <stdint.h>
-
+//由整数组成的有序集合,便于在上面进行二分查找，用于快速地判断一个元素是否属于这个集合
 typedef struct intset {
+    //整个统一的数据编码，表示intset中的每个数据元素用几个字节来存储
+    //intset中存储的整数最多只能占用64bit
+    //随着数据添加,可能改变数据编码,比如一些比较大的整数
     uint32_t encoding;
+    //inset中的元素个数
     uint32_t length;
+    //一个柔性数组,长度等于encoding * length,用于表达偏移量
+    //contents需要单独为其分配空间，这部分内存不包含在intset结构当中
     int8_t contents[];
 } intset;
 

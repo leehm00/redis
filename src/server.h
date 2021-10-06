@@ -395,7 +395,7 @@ typedef enum {
 
 /* Anti-warning macro... */
 #define UNUSED(V) ((void) V)
-
+//计算随机层数所需要的常量
 #define ZSKIPLIST_MAXLEVEL 32 /* Should be enough for 2^64 elements */
 #define ZSKIPLIST_P 0.25      /* Skiplist P = 1/4 */
 
@@ -1066,19 +1066,29 @@ struct sharedObjectsStruct {
 
 /* ZSETs use a specialized version of Skiplists */
 typedef struct zskiplistNode {
+    //zadd命令在将数据插入到skiplist里面之前先进行了解码，所以存储的一定是一个sds
+    //为了方便在查找的时候对数据进行字典序的比较，
+    //而且，skiplist里的value部分是数字的可能性也比较小,不是很方便压缩
     sds ele;
     double score;
+    //指向链表前一个节点的指针（前向指针）
+    //每个节点只有1个前向指针(没有依靠level分开)，所以只有第1层链表是一个双向链表
     struct zskiplistNode *backward;
+    //存放指向各层链表后一个节点的指针（后向指针）
+    //是一个柔性数组,占用内存不在zskiplistNode结构里面，需要插入节点的时候单独为它分配
+    //所以skiplist的每个节点所包含的指针数目是不固定的
     struct zskiplistLevel {
+        //每层对应1个后向指针，用forward字段表示
         struct zskiplistNode *forward;
+        //表示当前的指针跨越了多少个节点,用于计算元素排名
         unsigned long span;
     } level[];
 } zskiplistNode;
-
+//真正的skiplist结构
 typedef struct zskiplist {
     struct zskiplistNode *header, *tail;
-    unsigned long length;
-    int level;
+    unsigned long length;//链表长度,头指针为空,不算在计数中
+    int level;//总层数
 } zskiplist;
 
 typedef struct zset {

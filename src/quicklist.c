@@ -1,5 +1,8 @@
-/* quicklist.c - A doubly linked list of ziplists
- *
+/* quicklist.c - A doubly linked list of ziplists一个ziplist的双向链表
+ *类似于是数组的链表
+ 链表适合push,pop等修改工作,内存开销比较大(储存了很多其他的信息)
+ ziplist内存开销很小,类似于数组,但是修改很困难
+ 一个链表上的ziplist需要多少数据项,需要考察
  * Copyright (c) 2014, Matt Stancliff <matt@genges.com>
  * All rights reserved.
  *
@@ -91,6 +94,8 @@ void _quicklistBookmarkDelete(quicklist *ql, quicklistBookmark *bm);
 
 /* Create a new quicklist.
  * Free with quicklistRelease(). */
+ //创建一个空的quicklist
+ //一般情况下双向链表有空余头节点,quicklist链表并没有,只有初始化为null的head和tail
 quicklist *quicklistCreate(void) {
     struct quicklist *quicklist;
 
@@ -1439,6 +1444,8 @@ int quicklistPop(quicklist *quicklist, int where, unsigned char **data,
 }
 
 /* Wrapper to allow argument-based switching between HEAD/TAIL pop */
+//当头节点或者尾节点的ziplist没有超过大小限制时,新数据直接插入到对应的ziplist之中
+//否则会创建新的quicklistnode节点,新的ziplist,再把新节点插入到原来的quicklist之中
 void quicklistPush(quicklist *quicklist, void *value, const size_t sz,
                    int where) {
     if (where == QUICKLIST_HEAD) {

@@ -118,7 +118,12 @@ void zslFree(zskiplist *zsl) {
 /* Returns a random level for the new skiplist node we are going to create.
  * The return value of this function is between 1 and ZSKIPLIST_MAXLEVEL
  * (both inclusive), with a powerlaw-alike distribution where higher
- * levels are less likely to be returned. */
+ * levels are less likely to be returned. 
+ * 返回值介乎 1 和 ZSKIPLIST_MAXLEVEL 之间（包含 ZSKIPLIST_MAXLEVEL），
+ * 根据随机算法所使用的幂次定律，越大的值生成的几率越小。
+ *
+ * T = O(N)
+ */
 int zslRandomLevel(void) {
     int level = 1;
     while ((random()&0xFFFF) < (ZSKIPLIST_P * 0xFFFF))
