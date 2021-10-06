@@ -215,7 +215,7 @@ static void intsetMoveTail(intset *is, uint32_t from, uint32_t to) {
 
 /* Insert an integer in the intset
  * 尝试将元素 value 添加到整数集合中。
- * 返回值
+ * 返回值是一个intset指针,可能和传入的intset一样,也可能是新分配的空间
  * *success 的值指示添加是否成功：
  * - 如果添加成功，那么将 *success 的值设为 1 。
  * - 因为元素已存在而造成添加失败时，将 *success 的值设为 0 。
