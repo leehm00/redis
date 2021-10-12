@@ -1958,6 +1958,8 @@ int htNeedsResize(dict *dict) {
 
 /* If the percentage of used slots in the HT reaches HASHTABLE_MIN_FILL
  * we resize the hash table to save memory */
+// 如果字典的使用率比 HASHTABLE_MIN_FILL 常量要低
+// 那么通过缩小字典的体积来节约内存
 void tryResizeHashTables(int dbid) {
     if (htNeedsResize(server.db[dbid].dict))
         dictResize(server.db[dbid].dict);
@@ -1971,7 +1973,11 @@ void tryResizeHashTables(int dbid) {
  * of CPU time at every call of this function to perform some rehashing.
  *
  * The function returns 1 if some rehashing was performed, otherwise 0
- * is returned. */
+ * is returned.
+ * 虽然服务器在对数据库执行读取/写入命令时会对数据库进行渐进式 rehash ,
+ * 但如果服务器长期没有执行命令的话，数据库字典的 rehash 就可能一直没办法完成，
+ * 为了防止出现这种情况，我们需要对数据库执行主动 rehash 。 
+ * 主动执行了rehash之后返回1,否则返回0*/
 int incrementallyRehash(int dbid) {
     /* Keys dictionary */
     if (dictIsRehashing(server.db[dbid].dict)) {
@@ -2011,6 +2017,7 @@ const char *strChildType(int type) {
 
 /* Return true if there are active children processes doing RDB saving,
  * AOF rewriting, or some side process spawned by a loaded module. */
+ //孩子进程id是-1就代表没有孩子进程
 int hasActiveChildProcess() {
     return server.child_pid != -1;
 }

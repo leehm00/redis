@@ -932,32 +932,51 @@ typedef struct {
                                       need more reserved IDs use UINT64_MAX-1,
                                       -2, ... and so forth. */
 
+//I/O复用,所以需要为每个客户端维持一个状态,多个客户端在服务器用链表链接
 typedef struct client {
+    //client的id
     uint64_t id;            /* Client incremental unique ID. */
     connection *conn;
+    //协议版本
     int resp;               /* RESP protocol version. Can be 2 or 3. */
+    //当前正在使用的数据库
     redisDb *db;            /* Pointer to currently SELECTed DB. */
+    //客户端名字
     robj *name;             /* As set by CLIENT SETNAME. */
+    //缓冲区,用于储存指令
     sds querybuf;           /* Buffer we use to accumulate client queries. */
+    //在指令缓冲区中已经读到的位置
     size_t qb_pos;          /* The position we have read in querybuf. */
     sds pending_querybuf;   /* If this client is flagged as master, this buffer
                                represents the yet not applied portion of the
                                replication stream that we are receiving from
                                the master. */
+    //最近时间内缓冲区长度最大值
     size_t querybuf_peak;   /* Recent (100ms or more) peak of querybuf size. */
+    //当前指令的参数数量
     int argc;               /* Num of arguments of current command. */
+    //当前指令参数值
     robj **argv;            /* Arguments of current command. */
+    //参数有可能是重写过的,记录了原来的参数数量
     int original_argc;      /* Num of arguments of original command if arguments were rewritten. */
+    //参数有可能是重写过的,记录了原来的参数值
     robj **original_argv;   /* Arguments of original command if arguments were rewritten. */
     size_t argv_len_sum;    /* Sum of lengths of objects in argv list. */
+    //记录客户端执行的命令
     struct redisCommand *cmd, *lastcmd;  /* Last command executed. */
+    //与之前定义的user对应,从而赋予相应的权限,NULL是管理员
     user *user;             /* User associated with this connection. If the
                                user is set to NULL the connection can do
                                anything (admin). */
+    //指令类型,一条指令还是多条(内联)
     int reqtype;            /* Request protocol type: PROTO_REQ_* */
+    //还未读取的指令数量
     int multibulklen;       /* Number of multi bulk arguments left to read. */
+    //未读指令的
     long bulklen;           /* Length of bulk argument in multi bulk request. */
+    //回复链表
     list *reply;            /* List of reply objects to send to the client. */
+    //回复链表中对象的总大小
     unsigned long long reply_bytes; /* Tot bytes of objects in reply list. */
     size_t sentlen;         /* Amount of bytes already sent in the current
                                buffer or object being sent. */
