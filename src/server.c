@@ -78,7 +78,7 @@ double R_Zero, R_PosInf, R_NegInf, R_Nan;
 /* Global vars */
 struct redisServer server; /* Server global state */
 
-/* Our command table.
+/* Our command table.命令表
  *
  * Every entry is composed of the following fields:
  *
@@ -3945,7 +3945,7 @@ int populateSingleCommand(struct redisCommand *c, char *strflags) {
 
     return C_OK;
 }
-
+//初始化了Redis命令表，通过它可以由任意一个Redis命令的名字查找该命令的配置信息
 /* Populates the Redis Command Table starting from the hard coded list
  * we have on top of server.c file. */
 void populateCommandTable(void) {

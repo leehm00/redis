@@ -738,7 +738,7 @@ typedef struct redisObject {
     unsigned lru:LRU_BITS; /* LRU time (relative to global lru_clock) or
                             * LFU data (least significant 8 bits frequency
                             * and most significant 16 bits access time). */
-    //引用技术,允许robj在一定情况下被共享
+    //引用计数,允许robj在一定情况下被共享
     int refcount;
     //数据指针,指向真正的数据
     void *ptr;
@@ -773,14 +773,23 @@ typedef struct clientReplyBlock {
  * by integers from 0 (the default database) up to the max configured
  * database. The database number is the 'id' field in the structure. */
 typedef struct redisDb {
+    // 数据库键空间，保存着数据库中的所有键值对
     dict *dict;                 /* The keyspace for this DB */
+    // 键的过期时间，字典的键为键，字典的值为过期事件 UNIX 时间戳
     dict *expires;              /* Timeout of keys with a timeout set */
+    // 正处于阻塞状态的键
     dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/
+    // 可以解除阻塞的键
     dict *ready_keys;           /* Blocked keys that received a PUSH */
+    // 正在被 WATCH 命令监视的键
     dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
+    //数据库编码
     int id;                     /* Database ID */
+    // 数据库的键的平均 TTL ，统计信息
     long long avg_ttl;          /* Average TTL, just for stats */
+    //过期指针
     unsigned long expires_cursor; /* Cursor of the active expire cycle. */
+    //即将整理的键名称,用一个list保存
     list *defrag_later;         /* List of key names to attempt to defrag one by one, gradually. */
 } redisDb;
 
@@ -791,8 +800,11 @@ typedef struct dbBackup dbBackup;
 
 /* Client MULTI/EXEC state */
 typedef struct multiCmd {
+    //参数
     robj **argv;
+    //参数数量
     int argc;
+    //命令指针
     struct redisCommand *cmd;
 } multiCmd;
 

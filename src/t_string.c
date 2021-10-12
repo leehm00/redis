@@ -48,7 +48,7 @@ static int checkStringLength(client *c, long long size) {
 /* The setGenericCommand() function implements the SET operation with different
  * options and variants. This function is called in order to implement the
  * following commands: SET, SETEX, PSETEX, SETNX, GETSET.
- *
+ *实现了 SET 、 SETEX 、 PSETEX 和 SETNX 命令
  * 'flags' changes the behavior of the command (NX, XX or GET, see below).
  *
  * 'expire' represents an expire to set in form of a Redis object as passed
@@ -84,7 +84,8 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
     if (flags & OBJ_SET_GET) {
         if (getGenericCommand(c) == C_ERR) return;
     }
-
+    // 如果设置了 NX 或者 XX 参数，那么检查条件是否不符合这两个设置
+    // 在条件不符合时报错，报错的内容由 abort_reply 参数决定
     if ((flags & OBJ_SET_NX && lookupKeyWrite(c->db,key) != NULL) ||
         (flags & OBJ_SET_XX && lookupKeyWrite(c->db,key) == NULL))
     {
@@ -95,6 +96,7 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
     }
 
     genericSetKey(c,c->db,key, val,flags & OBJ_KEEPTTL,1);
+    //数据库设置为脏,避免公用冲突
     server.dirty++;
     notifyKeyspaceEvent(NOTIFY_STRING,"set",key,c->db->id);
 
@@ -305,14 +307,15 @@ void psetexCommand(client *c) {
 
 int getGenericCommand(client *c) {
     robj *o;
-
+    // 尝试从数据库中取出键 c->argv[1] 对应的值对象
+    // 如果键不存在时，向客户端发送回复信息，并返回 NULL
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.null[c->resp])) == NULL)
         return C_OK;
-
+    // 值对象存在，检查它的类型
     if (checkType(c,o,OBJ_STRING)) {
         return C_ERR;
     }
-
+    // 类型正确，向客户端返回对象的值
     addReplyBulk(c,o);
     return C_OK;
 }
@@ -326,7 +329,7 @@ void getCommand(client *c) {
  *
  * The getexCommand() function implements extended options and variants of the GET command. Unlike GET
  * command this command is not read-only.
- *
+ * 
  * The default behavior when no options are specified is same as GET and does not alter any TTL.
  *
  * Only one of the below options can be used at a given time.
@@ -475,7 +478,7 @@ void setrangeCommand(client *c) {
         o = dbUnshareStringValue(c->db,c->argv[1],o);
     }
 
-    if (sdslen(value) > 0) {
+    if (sdslen(value) > 0) {//感觉这里不需要加上>0的判断条件了
         o->ptr = sdsgrowzero(o->ptr,offset+sdslen(value));
         memcpy((char*)o->ptr+offset,value,sdslen(value));
         signalModifiedKey(c,c->db,c->argv[1]);

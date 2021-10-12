@@ -283,6 +283,7 @@ ziplist却是将表中每一项存放在前后连续的地址空间内
 /* We use this function to receive information about a ziplist entry.
  * Note that this is not how the data is actually encoded, is just what we
  * get filled by a function in order to operate more easily. */
+ //每一个entry的格式
 typedef struct zlentry {
     unsigned int prevrawlensize; /* Bytes used to encode the previous entry len*/
     unsigned int prevrawlen;     /* Previous entry len. */
