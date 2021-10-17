@@ -978,38 +978,62 @@ typedef struct client {
     list *reply;            /* List of reply objects to send to the client. */
     //回复链表中对象的总大小
     unsigned long long reply_bytes; /* Tot bytes of objects in reply list. */
+    // 已发送字节，用于处理 short write 
     size_t sentlen;         /* Amount of bytes already sent in the current
                                buffer or object being sent. */
+    //创建客户端时间
     time_t ctime;           /* Client creation time. */
     long duration;          /* Current command duration. Used for measuring latency of blocking/non-blocking cmds */
+    // 客户端最后一次和服务器互动的时间
     time_t lastinteraction; /* Time of the last interaction, used for timeout */
     time_t obuf_soft_limit_reached_time;
+    //客户端状态CLIENT_*
     uint64_t flags;         /* Client flags: CLIENT_* macros. */
     int authenticated;      /* Needed when the default user requires auth. */
+    //复制状态
     int replstate;          /* Replication state if this is a slave. */
     int repl_put_online_on_ack; /* Install slave write handler on first ACK. */
+    // 用于保存主服务器传来的 RDB 文件的文件描述符
     int repldbfd;           /* Replication DB file descriptor. */
+    // 读取主服务器传来的 RDB 文件的偏移量
     off_t repldboff;        /* Replication DB file offset. */
+    // 主服务器传来的 RDB 文件的大小
     off_t repldbsize;       /* Replication DB file size. */
     sds replpreamble;       /* Replication DB preamble. */
     long long read_reploff; /* Read replication offset if this is a master. */
+    // 主服务器的复制偏移量
     long long reploff;      /* Applied replication offset if this is a master. */
+    // 从服务器最后一次发送 REPLCONF ACK 时的偏移量
     long long repl_ack_off; /* Replication ack offset, if this is a slave. */
+    // 从服务器最后一次发送 REPLCONF ACK 的时间
     long long repl_ack_time;/* Replication ack time, if this is a slave. */
     long long repl_last_partial_write; /* The last time the server did a partial write from the RDB child pipe to this replica  */
     long long psync_initial_offset; /* FULLRESYNC reply offset other slaves
                                        copying this slave output buffer
                                        should use. */
+    // 主服务器的 master run ID
+    // 保存在客户端，用于执行部分重同步
     char replid[CONFIG_RUN_ID_SIZE+1]; /* Master replication ID (if master). */
+    // 从服务器的监听端口号
     int slave_listening_port; /* As configured with: REPLCONF listening-port */
     char *slave_addr;       /* Optionally given by REPLCONF ip-address */
     int slave_capa;         /* Slave capabilities: SLAVE_CAPA_* bitwise OR. */
+    //事务状态
     multiState mstate;      /* MULTI/EXEC state */
+    //阻塞类型
     int btype;              /* Type of blocking op if CLIENT_BLOCKED. */
+    //阻塞状态
     blockingState bpop;     /* blocking state */
+    // 最后被写入的全局复制偏移量
     long long woff;         /* Last write global replication offset. */
     list *watched_keys;     /* Keys WATCHED for MULTI/EXEC CAS */
+    // 这个字典记录了客户端所有订阅的频道
+    // 键为频道名字，值为 NULL
+    // 也即是，一个频道的集合
     dict *pubsub_channels;  /* channels a client is interested in (SUBSCRIBE) */
+    // 链表，包含多个 pubsubPattern 结构
+    // 记录了所有订阅频道的客户端的信息
+    // 新 pubsubPattern 结构总是被添加到表尾
     list *pubsub_patterns;  /* patterns a client is interested in (SUBSCRIBE) */
     sds peerid;             /* Cached peer ID. */
     sds sockname;           /* Cached connection target address. */
@@ -1040,6 +1064,7 @@ typedef struct client {
     uint64_t client_cron_last_memory_usage;
     int      client_cron_last_memory_type;
     /* Response buffer */
+    // 回复偏移量
     int bufpos;
     size_t buf_usable_size; /* Usable size of buffer. */
     /* Note that 'buf' must be the last field of client struct, because memory
@@ -1047,6 +1072,7 @@ typedef struct client {
      * but we want to make full use of given memory, i.e. we may access the
      * memory after 'buf'. To avoid make others fields corrupt, 'buf' must be
      * the last one. */
+    //回复缓冲区
     char buf[PROTO_REPLY_CHUNK_BYTES];
 } client;
 
@@ -1272,21 +1298,31 @@ typedef enum childInfoType {
 
 struct redisServer {
     /* General */
+    //主进程pid
     pid_t pid;                  /* Main process pid. */
+    //住线程id
     pthread_t main_thread_id;         /* Main thread id */
+    // 配置文件的绝对路径
     char *configfile;           /* Absolute config file path, or NULL */
+    //可执行文件绝对路径
     char *executable;           /* Absolute executable file path. */
     char **exec_argv;           /* Executable argv vector (copy). */
+    //根据client的数量修改hz
     int dynamic_hz;             /* Change hz value depending on # of clients. */
     int config_hz;              /* Configured HZ value. May be different than
                                    the actual 'hz' field value if dynamic-hz
                                    is enabled. */
     mode_t umask;               /* The umask value of the process on startup */
+    // serverCron() 每秒调用的次数
     int hz;                     /* serverCron() calls frequency in hertz */
     int in_fork_child;          /* indication that this is a fork child */
+    //数据库
     redisDb *db;
+    // 命令表（受到 rename 配置选项的作用）
     dict *commands;             /* Command table */
+    //原来的ming'liang
     dict *orig_commands;        /* Command table before command renaming. */
+    //事件状态
     aeEventLoop *el;
     rax *errors;                /* Errors table */
     redisAtomic unsigned int lruclock; /* Clock for LRU eviction */

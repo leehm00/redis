@@ -92,13 +92,18 @@ sds keyspaceEventsFlagsToString(int flags) {
 }
 
 /* The API provided to the rest of the Redis core is a simple function:
- *
+ *实现了发送数据库通知的功能
  * notifyKeyspaceEvent(int type, char *event, robj *key, int dbid);
  *
  * 'type' is the notification class we define in `server.h`.
+ * type是当前想要发送的通知的类型,根据这个判断通知发送与否,提前在server.h中定义过种类
  * 'event' is a C string representing the event name.
+ *  event 参数是一个字符串表示的事件名
  * 'key' is a Redis object representing the key name.
- * 'dbid' is the database ID where the key lives.  */
+ * key 参数是一个 Redis 对象表示的键名,是产生事件的键
+ * 'dbid' is the database ID where the key lives.
+ * dbid 参数为键所在(产生事件)的数据库  
+ * 每当一个redis命令需要发送数据库通知的时候,都会调用此函数,向函数传递命令的相关信息*/
 void notifyKeyspaceEvent(int type, char *event, robj *key, int dbid) {
     sds chan;
     robj *chanobj, *eventobj;
@@ -111,12 +116,14 @@ void notifyKeyspaceEvent(int type, char *event, robj *key, int dbid) {
      * they are interested in. */
      moduleNotifyKeyspaceEvent(type, event, key, dbid);
 
-    /* If notifications for this class of events are off, return ASAP. */
+    /* If notifications for this class of events are off, return ASAP. 
+    如果给定通知不是服务器允许发送的通知,直接返回*/
     if (!(server.notify_keyspace_events & type)) return;
 
     eventobj = createStringObject(event,strlen(event));
 
     /* __keyspace@<db>__:<key> <event> notifications. */
+    //发送键空间通知
     if (server.notify_keyspace_events & NOTIFY_KEYSPACE) {
         chan = sdsnewlen("__keyspace@",11);
         len = ll2string(buf,sizeof(buf),dbid);
@@ -124,13 +131,15 @@ void notifyKeyspaceEvent(int type, char *event, robj *key, int dbid) {
         chan = sdscatlen(chan, "__:", 3);
         chan = sdscatsds(chan, key->ptr);
         chanobj = createObject(OBJ_STRING, chan);
-        pubsubPublishMessage(chanobj, eventobj);
+        pubsubPublishMessage(chanobj, eventobj);//通过publish发送通知
         decrRefCount(chanobj);
     }
 
     /* __keyevent@<db>__:<event> <key> notifications. */
+    //发送键时间通知
     if (server.notify_keyspace_events & NOTIFY_KEYEVENT) {
         chan = sdsnewlen("__keyevent@",11);
+        //初始化为-1,加入前面发送键空间通知的时候计算过了就不会是-1,少计算一次
         if (len == -1) len = ll2string(buf,sizeof(buf),dbid);
         chan = sdscatlen(chan, buf, len);
         chan = sdscatlen(chan, "__:", 3);

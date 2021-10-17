@@ -109,7 +109,50 @@ int activeExpireCycleTryExpire(redisDb *db, dictEntry *de, long long now) {
 #define ACTIVE_EXPIRE_CYCLE_SLOW_TIME_PERC 25 /* Max % of CPU to use. */
 #define ACTIVE_EXPIRE_CYCLE_ACCEPTABLE_STALE 10 /* % of stale keys after which
                                                    we do extra efforts. */
-
+/* Try to expire a few timed out keys. The algorithm used is adaptive and
+ * will use few CPU cycles if there are few expiring keys, otherwise
+ * it will get more aggressive to avoid that too much memory is used by
+ * keys that can be removed from the keyspace.
+ *
+ * 函数尝试删除数据库中已经过期的键。
+ * 当带有过期时间的键比较少时，函数运行得比较保守，
+ * 如果带有过期时间的键比较多，那么函数会以更积极的方式来删除过期键，
+ * 从而可能地释放被过期键占用的内存。
+ *
+ * No more than REDIS_DBCRON_DBS_PER_CALL databases are tested at every
+ * iteration.
+ *
+ * 每次循环中被测试的数据库数目不会超过 REDIS_DBCRON_DBS_PER_CALL 。
+ *
+ * This kind of call is used when Redis detects that timelimit_exit is
+ * true, so there is more work to do, and we do it more incrementally from
+ * the beforeSleep() function of the event loop.
+ *
+ * 如果 timelimit_exit 为真，那么说明还有更多删除工作要做，
+ * 那么在 beforeSleep() 函数调用时，程序会再次执行这个函数。
+ *
+ * Expire cycle type:
+ *
+ * 过期循环的类型：
+ *
+ * If type is ACTIVE_EXPIRE_CYCLE_FAST the function will try to run a
+ * "fast" expire cycle that takes no longer than EXPIRE_FAST_CYCLE_DURATION
+ * microseconds, and is not repeated again before the same amount of time.
+ *
+ * 如果循环的类型为 ACTIVE_EXPIRE_CYCLE_FAST ，
+ * 那么函数会以“快速过期”模式执行，
+ * 执行的时间不会长过 EXPIRE_FAST_CYCLE_DURATION 毫秒，
+ * 并且在 EXPIRE_FAST_CYCLE_DURATION 毫秒之内不会再重新执行。
+ *
+ * If type is ACTIVE_EXPIRE_CYCLE_SLOW, that normal expire cycle is
+ * executed, where the time limit is a percentage of the REDIS_HZ period
+ * as specified by the REDIS_EXPIRELOOKUPS_TIME_PERC define. 
+ *
+ * 如果循环的类型为 ACTIVE_EXPIRE_CYCLE_SLOW ，
+ * 那么函数会以“正常过期”模式执行，
+ * 函数的执行时限为 REDIS_HS 常量的一个百分比，
+ * 这个百分比由 REDIS_EXPIRELOOKUPS_TIME_PERC 定义。
+ */
 void activeExpireCycle(int type) {
     /* Adjust the running parameters according to the configured expire
      * effort. The default effort is 1, and the maximum configurable effort
@@ -127,6 +170,8 @@ void activeExpireCycle(int type) {
 
     /* This function has some global state in order to continue the work
      * incrementally across calls. */
+    // 静态变量，用来累积函数连续执行时的数据
+    //记录当前函数检查的进度,下一次调用接着这次的进度处理,当所有数据库检查完毕之后,重置为0
     static unsigned int current_db = 0; /* Next DB to test. */
     static int timelimit_exit = 0;      /* Time limit hit in previous call? */
     static long long last_fast_cycle = 0; /* When last fast cycle ran. */

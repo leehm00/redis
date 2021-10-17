@@ -2441,22 +2441,47 @@ void cronUpdateMemoryStats() {
 }
 
 /* This is our timer interrupt, called server.hz times per second.
+ *
+ * 这是 Redis 的时间中断器，每秒调用 server.hz 次。
+ *
  * Here is where we do a number of things that need to be done asynchronously.
  * For instance:
  *
+ * 以下是需要异步执行的操作：
+ *
  * - Active expired keys collection (it is also performed in a lazy way on
  *   lookup).
+ *   主动清除过期键。
+ *
  * - Software watchdog.
+ *   更新软件 watchdog 的信息。
+ *
  * - Update some statistic.
+ *   更新统计信息。
+ *
  * - Incremental rehashing of the DBs hash tables.
+ *   对数据库进行渐增式 Rehash
+ *
  * - Triggering BGSAVE / AOF rewrite, and handling of terminated children.
+ *   触发 BGSAVE 或者 AOF 重写，并处理之后由 BGSAVE 和 AOF 重写引发的子进程停止。
+ *
  * - Clients timeout of different kinds.
+ *   处理客户端超时。
+ *
  * - Replication reconnection.
+ *   复制重连
+ *
  * - Many more...
+ *   等等。。。
  *
  * Everything directly called here will be called server.hz times per second,
  * so in order to throttle execution of things we want to do less frequently
  * a macro is used: run_with_period(milliseconds) { .... }
+ *
+ * 因为 serverCron 函数中的所有代码都会每秒调用 server.hz 次，
+ * 为了对部分代码的调用次数进行限制，
+ * 使用了一个宏 run_with_period(milliseconds) { ... } ，
+ * 这个宏可以将被包含代码的执行次数降低为每 milliseconds 执行一次。
  */
 
 int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
@@ -2486,6 +2511,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
             }
         }
     }
+    // 记录服务器执行命令的次数
 
     run_with_period(100) {
         long long stat_net_input_bytes, stat_net_output_bytes;
@@ -2499,7 +2525,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
                 stat_net_output_bytes);
     }
 
-    /* We have just LRU_BITS bits per object for LRU information.
+    /* We have just REDIS_LRU_BITS bits per object for LRU information.
      * So we use an (eventually wrapping) LRU clock.
      *
      * Note that even if the counter wraps it's not a big problem,
@@ -2508,8 +2534,15 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
      * touched for all the time needed to the counter to wrap, which is
      * not likely.
      *
+     * 即使服务器的时间最终比 1.5 年长也无所谓，
+     * 对象系统仍会正常运作，不过一些对象可能会比服务器本身的时钟更年轻。
+     * 不过这要这个对象在 1.5 年内都没有被访问过，才会出现这种现象。
+     *
      * Note that you can change the resolution altering the
-     * LRU_CLOCK_RESOLUTION define. */
+     * REDIS_LRU_CLOCK_RESOLUTION define.
+     *
+     * LRU 时间的精度可以通过修改 REDIS_LRU_CLOCK_RESOLUTION 常量来改变。
+     */
     unsigned int lruclock = getLRUClock();
     atomicSet(server.lruclock,lruclock);
 
@@ -2524,14 +2557,18 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     }
 
     /* Show some info about non-empty databases */
+    // 打印数据库的键值对信息
     if (server.verbosity <= LL_VERBOSE) {
         run_with_period(5000) {
             for (j = 0; j < server.dbnum; j++) {
                 long long size, used, vkeys;
-
+                //可用键值对数量
                 size = dictSlots(server.db[j].dict);
+                //已用键值对数量
                 used = dictSize(server.db[j].dict);
+                //带有过期时间的键值对数量(就是rxpire字典)
                 vkeys = dictSize(server.db[j].expires);
+                //用log打印数量
                 if (used || vkeys) {
                     serverLog(LL_VERBOSE,"DB %d: %lld keys (%lld volatile) in %lld slots HT.",j,used,vkeys,size);
                 }
@@ -2540,6 +2577,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     }
 
     /* Show information about connected clients */
+    // 如果服务器没有运行在 SENTINEL 模式下，那么打印客户端的连接信息
     if (!server.sentinel_mode) {
         run_with_period(5000) {
             serverLog(LL_DEBUG,
@@ -2551,9 +2589,11 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     }
 
     /* We need to do a few operations on clients asynchronously. */
+    // 检查客户端，关闭超时客户端，并释放客户端多余的缓冲区
     clientsCron();
 
     /* Handle background operations on Redis databases. */
+    // 对数据库执行各种操作
     databasesCron();
 
     /* Start a scheduled AOF rewrite if this was requested by the user while
