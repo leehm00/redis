@@ -77,14 +77,25 @@ typedef struct aeFileEvent {
 } aeFileEvent;
 
 /* Time event structure */
+//时间事件的结构,种类包括定时事件和周期性事件
 typedef struct aeTimeEvent {
+    //事件的唯一标识符,从小到大表示从旧到新
     long long id; /* time event identifier. */
+    //事件的到达时间
     monotime when;
+    //时间事件处理器,一个函数
+    //时间事件的种类决定于这个函数的返回值
+    //AE_NOMORE表示定时事件,到达一次之后被删除并且不会再次到达
+    //返回其他整数n表示周期性事件,服务器对事件的when属性进行更新,使之n毫秒之后再次到达
     aeTimeProc *timeProc;
+    //事件释放函数
     aeEventFinalizerProc *finalizerProc;
+    //多路复用库的私有数据
     void *clientData;
+    //指向上一个和下一个时间事件结构,形成链表
     struct aeTimeEvent *prev;
     struct aeTimeEvent *next;
+    //防止在迭代过程中周期性事件被释放
     int refcount; /* refcount to prevent timer events from being
   		   * freed in recursive time event calls. */
 } aeTimeEvent;
@@ -96,16 +107,27 @@ typedef struct aeFiredEvent {
 } aeFiredEvent;
 
 /* State of an event based program */
+//事件处理器状态(同时是时间处理器和文件处理器)
 typedef struct aeEventLoop {
+    //当前注册的最大描述符
     int maxfd;   /* highest file descriptor currently registered */
+    //当前追踪的最大描述符
     int setsize; /* max number of file descriptors tracked */
+    //时间事件的id,时间事件链表中记录了最大的id
     long long timeEventNextId;
+    //已注册的文件事件
     aeFileEvent *events; /* Registered events */
+    //已经就绪,执行过处理器的文件事件
     aeFiredEvent *fired; /* Fired events */
+    //时间事件
     aeTimeEvent *timeEventHead;
+    //事件处理器开关
     int stop;
+    //多路复用库的私有数据
     void *apidata; /* This is used for polling API specific data */
+    //处理事件之前要执行的函数
     aeBeforeSleepProc *beforesleep;
+    //处理事件之后要执行的函数
     aeBeforeSleepProc *aftersleep;
     int flags;
 } aeEventLoop;

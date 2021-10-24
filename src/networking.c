@@ -1128,7 +1128,7 @@ static void acceptCommonHandler(connection *conn, int flags, char *ip) {
         return;
     }
 }
-
+//创建一个TCP连接
 void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     int cport, cfd, max = MAX_ACCEPTS_PER_CALL;
     char cip[NET_IP_STR_LEN];
@@ -1137,6 +1137,7 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     UNUSED(privdata);
 
     while(max--) {
+        //accept客户端连接
         cfd = anetTcpAccept(server.neterr, fd, cip, sizeof(cip), &cport);
         if (cfd == ANET_ERR) {
             if (errno != EWOULDBLOCK)
@@ -1145,6 +1146,7 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
             return;
         }
         serverLog(LL_VERBOSE,"Accepted %s:%d", cip, cport);
+        // 为客户端创建客户端状态（redisClient）
         acceptCommonHandler(connCreateAcceptedSocket(cfd),0,cip);
     }
 }
@@ -1510,47 +1512,64 @@ client *lookupClientByID(uint64_t id) {
  * thread safe. */
 int writeToClient(client *c, int handler_installed) {
     /* Update total number of writes on server */
+    //更新写回复计数器
     atomicIncr(server.stat_total_writes_processed, 1);
 
     ssize_t nwritten = 0, totwritten = 0;
     size_t objlen;
     clientReplyBlock *o;
-
+    //一直循环直到回复缓冲区为空
     while(clientHasPendingReplies(c)) {
         if (c->bufpos > 0) {
+            // 写入内容到套接字
+            // c->sentlen 是用来处理 short write 的
+            // 当出现 short write ，导致写入未能一次完成时,
+            // c->buf+c->sentlen 就会偏移到正确（未写入）内容的位置上。
             nwritten = connWrite(c->conn,c->buf+c->sentlen,c->bufpos-c->sentlen);
+            //出错时跳出循环
             if (nwritten <= 0) break;
+            //写入之后更新写入计数器变量
             c->sentlen += nwritten;
             totwritten += nwritten;
 
             /* If the buffer was sent, set bufpos to zero to continue with
              * the remainder of the reply. */
+            // 如果缓冲区中的内容已经全部写入完毕
+            // 那么清空客户端的两个计数器变量
             if ((int)c->sentlen == c->bufpos) {
                 c->bufpos = 0;
                 c->sentlen = 0;
             }
         } else {
+            //取出位于链表最前面的对象
             o = listNodeValue(listFirst(c->reply));
             objlen = o->used;
-
+            //空对象不做处理
             if (objlen == 0) {
                 c->reply_bytes -= o->size;
                 listDelNode(c->reply,listFirst(c->reply));
                 continue;
             }
-
+            // 写入内容到套接字
+            // c->sentlen 是用来处理 short write 的
+            // 当出现 short write ，导致写入未能一次完成时，
+            // c->buf+c->sentlen 就会偏移到正确（未写入）内容的位置上
             nwritten = connWrite(c->conn, o->buf + c->sentlen, objlen - c->sentlen);
+            //写入出错时跳出
             if (nwritten <= 0) break;
+            //成功写入时更新计数器变量
             c->sentlen += nwritten;
             totwritten += nwritten;
 
             /* If we fully sent the object on head go to the next one */
+            // 如果缓冲区内容全部写入完毕，那么删除已写入完毕的节点
             if (c->sentlen == objlen) {
                 c->reply_bytes -= o->size;
                 listDelNode(c->reply,listFirst(c->reply));
                 c->sentlen = 0;
                 /* If there are no longer objects in the list, we expect
                  * the count of reply bytes to be exactly zero. */
+                //list之中没有对象,reply的字节数设置为0
                 if (listLength(c->reply) == 0)
                     serverAssert(c->reply_bytes == 0);
             }
@@ -1566,13 +1585,23 @@ int writeToClient(client *c, int handler_installed) {
          *
          * Moreover, we also send as much as possible if the client is
          * a slave or a monitor (otherwise, on high-speed traffic, the
-         * replication/output buffer will grow indefinitely) */
+         * replication/output buffer will grow indefinitely) 
+         * 为了避免一个非常大的回复独占服务器，
+         * 当写入的总数量大于 REDIS_MAX_WRITE_PER_EVENT ，
+         * 临时中断写入，将处理时间让给其他客户端，
+         * 剩余的内容等下次写入就绪再继续写入
+         * 不过，如果服务器的内存占用已经超过了限制，
+         * 那么为了将回复缓冲区中的内容尽快写入给客户端，
+         * 然后释放回复缓冲区的空间来回收内存，
+         * 这时即使写入量超过了 REDIS_MAX_WRITE_PER_EVENT ，
+         * 程序也继续进行写入*/
         if (totwritten > NET_MAX_WRITES_PER_EVENT &&
             (server.maxmemory == 0 ||
              zmalloc_used_memory() < server.maxmemory) &&
             !(c->flags & CLIENT_SLAVE)) break;
     }
     atomicIncr(server.stat_net_output_bytes, totwritten);
+    //写入出错检测
     if (nwritten == -1) {
         if (connGetState(c->conn) != CONN_STATE_CONNECTED) {
             serverLog(LL_VERBOSE,
@@ -1593,10 +1622,12 @@ int writeToClient(client *c, int handler_installed) {
         /* Note that writeToClient() is called in a threaded way, but
          * adDeleteFileEvent() is not thread safe: however writeToClient()
          * is always called with handler_installed set to 0 from threads
-         * so we are fine. */
+         * so we are fine. *///前面应该是aeDeleteFileEvent()
+        //不能直接删除write handler,因为本身调用就是在线程之中了,aeDeleteFileEvent()线程不安全
         if (handler_installed) connSetWriteHandler(c->conn, NULL);
 
         /* Close connection after entire reply has been sent. */
+        // 如果指定了写入之后关闭客户端 FLAG ，那么关闭客户端
         if (c->flags & CLIENT_CLOSE_AFTER_REPLY) {
             freeClientAsync(c);
             return C_ERR;
@@ -1606,6 +1637,9 @@ int writeToClient(client *c, int handler_installed) {
 }
 
 /* Write event handler. Just send data to the client. */
+/*
+ * 负责传送命令回复的写处理器
+ */
 void sendReplyToClient(connection *conn) {
     client *c = connGetPrivateData(conn);
     writeToClient(c,1);
@@ -2138,7 +2172,9 @@ void processInputBuffer(client *c) {
         c->qb_pos = 0;
     }
 }
-
+/*
+ * 读取客户端的查询缓冲区内容
+ */
 void readQueryFromClient(connection *conn) {
     client *c = connGetPrivateData(conn);
     int nread, big_arg = 0;
@@ -2149,6 +2185,7 @@ void readQueryFromClient(connection *conn) {
     if (postponeClientRead(c)) return;
 
     /* Update total number of reads on server */
+    //更新server的读入处理计数器
     atomicIncr(server.stat_total_reads_processed, 1);
 
     readlen = PROTO_IOBUF_LEN;
@@ -2168,14 +2205,18 @@ void readQueryFromClient(connection *conn) {
          * for example once we resume a blocked client after CLIENT PAUSE. */
         if (remaining > 0) readlen = remaining;
     }
-
+    // 获取查询缓冲区当前内容的长度
+    // 如果读取出现 short read ，那么可能会有内容滞留在读取缓冲区里面
+    // 这些滞留内容也许不能完整构成一个符合协议的命令
     qblen = sdslen(c->querybuf);
+    //为查询缓冲区分配空间
     if (big_arg || sdsalloc(c->querybuf) < PROTO_IOBUF_LEN) {
         /* When reading a BIG_ARG we won't be reading more than that one arg
          * into the query buffer, so we don't need to pre-allocate more than we
          * need, so using the non-greedy growing. For an initial allocation of
          * the query buffer, we also don't wanna use the greedy growth, in order
          * to avoid collision with the RESIZE_THRESHOLD mechanism. */
+        //太长的指令参数只读入一个参数,查询缓冲区不需要多余分配空间,不使用贪心分配空间
         c->querybuf = sdsMakeRoomForNonGreedy(c->querybuf, readlen);
     } else {
         c->querybuf = sdsMakeRoomFor(c->querybuf, readlen);
@@ -2183,7 +2224,9 @@ void readQueryFromClient(connection *conn) {
         /* Read as much as possible from the socket to save read(2) system calls. */
         readlen = sdsavail(c->querybuf);
     }
+    //读入内容到查询缓存
     nread = connRead(c->conn, c->querybuf+qblen, readlen);
+    //读入出错时
     if (nread == -1) {
         if (connGetState(conn) == CONN_STATE_CONNECTED) {
             return;
@@ -2192,6 +2235,7 @@ void readQueryFromClient(connection *conn) {
             freeClientAsync(c);
             return;
         }
+    //遇到EOF
     } else if (nread == 0) {
         if (server.verbosity <= LL_VERBOSE) {
             sds info = catClientInfoString(sdsempty(), c);
@@ -2204,17 +2248,23 @@ void readQueryFromClient(connection *conn) {
         /* Append the query buffer to the pending (not applied) buffer
          * of the master. We'll use this buffer later in order to have a
          * copy of the string applied by the last command executed. */
+        // 根据内容，更新查询缓冲区（SDS） free 和 len 属性
+        // 并将 '\0' 正确地放到内容的最后
         c->pending_querybuf = sdscatlen(c->pending_querybuf,
                                         c->querybuf+qblen,nread);
     }
 
     sdsIncrLen(c->querybuf,nread);
     qblen = sdslen(c->querybuf);
+    // 如果有需要，更新缓冲区内容长度的峰值（peak）
     if (c->querybuf_peak < qblen) c->querybuf_peak = qblen;
-
+    // 记录服务器和客户端最后一次互动的时间
     c->lastinteraction = server.unixtime;
+    // 如果客户端是 master 的话，更新它的复制偏移量
     if (c->flags & CLIENT_MASTER) c->read_reploff += nread;
     atomicIncr(server.stat_net_input_bytes, nread);
+    // 查询缓冲区长度超出服务器最大缓冲区长度
+    // 清空缓冲区并释放客户端
     if (!(c->flags & CLIENT_MASTER) && sdslen(c->querybuf) > server.client_max_querybuf_len) {
         sds ci = catClientInfoString(sdsempty(),c), bytes = sdsempty();
 
@@ -2228,6 +2278,8 @@ void readQueryFromClient(connection *conn) {
 
     /* There is more data in the client input buffer, continue parsing it
      * in case to check if there is a full command to execute. */
+    // 从查询缓存重读取内容，创建参数，并执行命令
+    // 函数会执行到缓存中的所有内容都被处理完为止
      processInputBuffer(c);
 }
 
