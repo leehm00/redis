@@ -68,12 +68,26 @@ typedef int aeTimeProc(struct aeEventLoop *eventLoop, long long id, void *client
 typedef void aeEventFinalizerProc(struct aeEventLoop *eventLoop, void *clientData);
 typedef void aeBeforeSleepProc(struct aeEventLoop *eventLoop);
 
-/* File event structure */
+/* File event structure
+ *
+ * 文件事件结构
+ */
 typedef struct aeFileEvent {
-    int mask; /* one of AE_(READABLE|WRITABLE|BARRIER) */
+
+    // 监听事件类型掩码，
+    // 值可以是 AE_READABLE 或 AE_WRITABLE ，
+    // 或者 AE_READABLE | AE_WRITABLE
+    int mask; /* one of AE_(READABLE|WRITABLE) */
+
+    // 读事件处理器
     aeFileProc *rfileProc;
+
+    // 写事件处理器
     aeFileProc *wfileProc;
+
+    // 多路复用库的私有数据
     void *clientData;
+
 } aeFileEvent;
 
 /* Time event structure */

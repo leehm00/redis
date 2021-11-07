@@ -243,23 +243,44 @@ extern int configOOMScoreAdjValuesDefaults[CONFIG_OOM_COUNT];
 #define AOF_FAILED 4
 
 /* Client flags */
+//主从服务器进行复制时,相互都是客户端的关系,slave和master区分两个服务器
 #define CLIENT_SLAVE (1<<0)   /* This client is a replica */
 #define CLIENT_MASTER (1<<1)  /* This client is a master */
+//正在执行monitor指令,是一个从客户端
 #define CLIENT_MONITOR (1<<2) /* This client is a slave monitor, see MONITOR */
+//执行事务
 #define CLIENT_MULTI (1<<3)   /* This client is in a MULTI context */
+//客户端被阻塞
 #define CLIENT_BLOCKED (1<<4) /* The client is waiting in a blocking operation */
-#define CLIENT_DIRTY_CAS (1<<5) /* Watched keys modified. EXEC will fail. */
+//事务使用WATCH监视的数据库键已经被修改,EXEC执行过程中会直接fail
+#define CLIENT_DIRTY_CAS (1<<5)
+//用户对这个客户端执行了 CLIENT KILL命令或者客户端发送给服务器的命令中协议内容有误, 
+//服务器会将客户端积存在输出缓冲区中的所有内容发送给客户端,然后关闭客户端
 #define CLIENT_CLOSE_AFTER_REPLY (1<<6) /* Close after writing entire reply. */
+//从阻塞中解除,只有在之前阻塞过才可用
 #define CLIENT_UNBLOCKED (1<<7) /* This client was unblocked and is stored in
                                   server.unblocked_clients */
+//专门处理Lua脚本的客户端
 #define CLIENT_LUA (1<<8) /* This is a non connected client used by Lua */
+//客户端向集群节点（ 运行在集群模式下的服务器） 发送了ASKING 命令
 #define CLIENT_ASKING (1<<9)     /* Client issued the ASKING command */
+//客户端的输出缓冲区大小超出了服务器允许的范围，
+//服务器会在下一次执行 serverCron 函数时关闭这个客户端,以免影响服务器的稳定性
+//积存在输出缓冲区中的所有内容会直接被释放,不会返回给客户端.
 #define CLIENT_CLOSE_ASAP (1<<10)/* Close this client ASAP */
+//服务器使用 UNIX 套接字来连接客户端
 #define CLIENT_UNIX_SOCKET (1<<11) /* Client connected via Unix domain socket */
+//事务在命令入队时出现了错误,与 CLIENT_DIRT/Y_CAS 都表示了事务不安全,不能直接退出了
 #define CLIENT_DIRTY_EXEC (1<<12)  /* EXEC will fail for errors while queueing */
+//在主从服务器进行命令传播期间,从服务器需要向主服务器发送REPLICATION ACK命令
+//发送命令之前需要打开这个标志以允许发送操作执行
 #define CLIENT_MASTER_FORCE_REPLY (1<<13)  /* Queue replies even if is master */
+//执行PUBSUB指令时打开,强制服务器将当前执行的命令写人到 AOF 文件里面
 #define CLIENT_FORCE_AOF (1<<14)   /* Force AOF propagation of current cmd. */
+//执行SCRIPT LOADD指令时打开,强制主服务器将当前执行的命令复制给所有从服务器
 #define CLIENT_FORCE_REPL (1<<15)  /* Force replication of current cmd. */
+//主服务器不能使用PSYNC命令与当前低版本从服务器进行同步.
+//这个标志只能在 REDIS_SLAVE 标志处于打开状态时使用
 #define CLIENT_PRE_PSYNC (1<<16)   /* Instance don't understand PSYNC. */
 #define CLIENT_READONLY (1<<17)    /* Cluster client is in read-only state. */
 #define CLIENT_PUBSUB (1<<18)      /* Client is in Pub/Sub mode. */
@@ -984,8 +1005,9 @@ typedef struct client {
     //创建客户端时间
     time_t ctime;           /* Client creation time. */
     long duration;          /* Current command duration. Used for measuring latency of blocking/non-blocking cmds */
-    // 客户端最后一次和服务器互动的时间
+    // 客户端最后一次和服务器互动的时间	,即客户端空转时间
     time_t lastinteraction; /* Time of the last interaction, used for timeout */
+    //达到buf软性限制的时间,太长的话会被kill
     time_t obuf_soft_limit_reached_time;
     //客户端状态CLIENT_*
     uint64_t flags;         /* Client flags: CLIENT_* macros. */
@@ -1367,9 +1389,13 @@ struct redisServer {
     socketFds tlsfd;            /* TLS socket file descriptors */
     int sofd;                   /* Unix socket file descriptor */
     socketFds cfd;              /* Cluster bus listening socket */
+    //链表,保存了所有的客户端状态
     list *clients;              /* List of active clients */
+    //保存所有的待关闭客户端
     list *clients_to_close;     /* Clients to close asynchronously */
+    //将要写的客户端列表
     list *clients_pending_write; /* There is to write or install handler. */
+    //将要读的客户端列表(已经知道有指令输入了)
     list *clients_pending_read;  /* Client has pending read socket buffers. */
     list *slaves, *monitors;    /* List of slaves and MONITORs */
     client *current_client;     /* Current client executing the command. */
@@ -1875,10 +1901,14 @@ typedef struct {
 typedef void redisCommandProc(client *c);
 typedef int redisGetKeysProc(struct redisCommand *cmd, robj **argv, int argc, getKeysResult *result);
 struct redisCommand {
+    //命令名称
     /* Declarative data */
     char *name;
+    //实现函数
     redisCommandProc *proc;
+    //参数个数
     int arity;
+    //字符串表示的flag,一个char代表一个flag
     char *sflags;   /* Flags as string representation, one char per flag. */
     keySpec key_specs_static[STATIC_KEY_SPECS_NUM];
     /* Use a function to determine keys arguments in a command line.
@@ -1886,6 +1916,7 @@ struct redisCommand {
     redisGetKeysProc *getkeys_proc;
 
     /* Runtime data */
+    //运行时的数据
     uint64_t flags; /* The actual flags, obtained from the 'sflags' field. */
     /* What keys should be loaded in background when calling this command? */
     long long microseconds, calls, rejected_calls, failed_calls;
