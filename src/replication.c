@@ -2235,7 +2235,12 @@ int slaveTryPartialResynchronization(connection *conn, int read_reply) {
 }
 
 /* This handler fires when the non blocking connect was able to
- * establish a connection with the master. */
+ * establish a connection with the master. 
+ * 处理复制工作的处理器；在连接master的时候，绑定到套接字
+ * 这个函数用于处理 连接成功后的 复制工作；
+ * 例如接受RDB文件，接受主服务器传播来的写命令等；
+ * 
+ * 非阻塞连接能够与master建立连接时,这个处理程序将被激发。*/
 void syncWithMaster(connection *conn) {
     char tmpfile[256], *err = NULL;
     int dfd = -1, maxtries = 5;
@@ -2255,7 +2260,7 @@ void syncWithMaster(connection *conn) {
                 connGetLastError(conn));
         goto error;
     }
-
+    //发送ping检验是否连接成功
     /* Send a PING to check the master is able to reply without errors. */
     if (server.repl_state == REPL_STATE_CONNECTING) {
         serverLog(LL_NOTICE,"Non blocking connect for SYNC fired the event.");
@@ -2272,6 +2277,7 @@ void syncWithMaster(connection *conn) {
     }
 
     /* Receive the PONG command. */
+    //等待pong,收到pong之后
     if (server.repl_state == REPL_STATE_RECEIVE_PING_REPLY) {
         err = receiveSynchronousResponse(conn);
 
@@ -2280,6 +2286,7 @@ void syncWithMaster(connection *conn) {
          * Note that older versions of Redis replied with "operation not
          * permitted" instead of using a proper error code, so we test
          * both. */
+        //对于旧版本的支持
         if (err[0] != '+' &&
             strncmp(err,"-NOAUTH",7) != 0 &&
             strncmp(err,"-NOPERM",7) != 0 &&
@@ -2299,6 +2306,7 @@ void syncWithMaster(connection *conn) {
 
     if (server.repl_state == REPL_STATE_SEND_HANDSHAKE) {
         /* AUTH with the master if required. */
+        //身份验证
         if (server.masterauth) {
             char *args[3] = {"AUTH",NULL,NULL};
             size_t lens[3] = {4,0,0};
@@ -2745,15 +2753,16 @@ void replicationHandleMasterDisconnection(void) {
         connectWithMaster();
     }
 }
-
+//复制命令实现
 void replicaofCommand(client *c) {
     /* SLAVEOF is not allowed in cluster mode as replication is automatically
      * configured using the current address of the master node. */
+    //集群模式下不允许复制
     if (server.cluster_enabled) {
         addReplyError(c,"REPLICAOF not allowed in cluster mode.");
         return;
     }
-
+    //主服务器fail的时候也不能复制
     if (server.failover_state != NO_FAILOVER) {
         addReplyError(c,"REPLICAOF not allowed while failing over.");
         return;
@@ -2762,17 +2771,18 @@ void replicaofCommand(client *c) {
     /* The special host/port combination "NO" "ONE" turns the instance
      * into a master. Otherwise the new master address is set. */
     if (!strcasecmp(c->argv[1]->ptr,"no") &&
-        !strcasecmp(c->argv[2]->ptr,"one")) {
+        !strcasecmp(c->argv[2]->ptr,"one")) {//slave of no one 命令断开复制
         if (server.masterhost) {
             replicationUnsetMaster();
             sds client = catClientInfoString(sdsempty(),c);
             serverLog(LL_NOTICE,"MASTER MODE enabled (user request from '%s')",
-                client);
+                client);//写入log
             sdsfree(client);
         }
     } else {
         long port;
 
+        //读取参数中master的端口号
         if (c->flags & CLIENT_SLAVE)
         {
             /* If a client is already a replica they cannot run this command,
@@ -2781,11 +2791,11 @@ void replicaofCommand(client *c) {
             addReplyError(c, "Command is not valid when client is a replica.");
             return;
         }
-
+        //请求的port不可用
         if (getRangeLongFromObjectOrReply(c, c->argv[2], 0, 65535, &port,
                                           "Invalid master port") != C_OK)
             return;
-
+        //检查是否连接到指定的主服务器
         /* Check if we are already attached to the specified master */
         if (server.masterhost && !strcasecmp(server.masterhost,c->argv[1]->ptr)
             && server.masterport == port) {
@@ -2796,20 +2806,25 @@ void replicaofCommand(client *c) {
                                  "master\r\n"));
             return;
         }
+        //没有之前设定的主服务器,连接用户指定服务器
+        //在当前从服务器记录他的主服务器信息
         /* There was no previous master or the user specified a different one,
          * we can continue. */
         replicationSetMaster(c->argv[1]->ptr, port);
+        //获取客户端信息
         sds client = catClientInfoString(sdsempty(),c);
         serverLog(LL_NOTICE,"REPLICAOF %s:%d enabled (user request from '%s')",
             server.masterhost, server.masterport, client);
         sdsfree(client);
     }
+    //命令行回复OK
     addReply(c,shared.ok);
 }
 
 /* ROLE command: provide information about the role of the instance
  * (master or slave) and additional information related to replication
  * in an easy to process format. */
+//复制命令实现
 void roleCommand(client *c) {
     if (server.masterhost == NULL) {
         listIter li;
@@ -2866,6 +2881,7 @@ void roleCommand(client *c) {
 /* Send a REPLCONF ACK command to the master to inform it about the current
  * processed offset. If we are not connected with a master, the command has
  * no effects. */
+//发送心跳包的函数
 void replicationSendAck(void) {
     client *c = server.master;
 
@@ -3298,6 +3314,7 @@ void replicationCron(void) {
     updateFailoverStatus();
 
     /* Non blocking connection timeout? */
+    //判断是否连接超时
     if (server.masterhost &&
         (server.repl_state == REPL_STATE_CONNECTING ||
          slaveIsInHandshakeState()) &&
@@ -3308,6 +3325,7 @@ void replicationCron(void) {
     }
 
     /* Bulk transfer I/O timeout? */
+    //判断当前服务器身份,是slave且大量传输I/O超时
     if (server.masterhost && server.repl_state == REPL_STATE_TRANSFER &&
         (time(NULL)-server.repl_transfer_lastio) > server.repl_timeout)
     {
@@ -3316,6 +3334,7 @@ void replicationCron(void) {
     }
 
     /* Timed out master when we are an already connected slave? */
+    //判断当前服务器身份,是slave且与master互动超时
     if (server.masterhost && server.repl_state == REPL_STATE_CONNECTED &&
         (time(NULL)-server.master->lastinteraction) > server.repl_timeout)
     {
@@ -3324,6 +3343,7 @@ void replicationCron(void) {
     }
 
     /* Check if we should connect to a MASTER */
+    //在REPL_STATE_CONNECT状态下的slave还没有和master建立链接
     if (server.repl_state == REPL_STATE_CONNECT) {
         serverLog(LL_NOTICE,"Connecting to MASTER %s:%d",
             server.masterhost, server.masterport);
@@ -3333,6 +3353,7 @@ void replicationCron(void) {
     /* Send ACK to master from time to time.
      * Note that we do not send periodic acks to masters that don't
      * support PSYNC and replication offsets. */
+    //发送心跳包,如果master不支持PSYNC和复制偏移就不发送
     if (server.masterhost && server.master &&
         !(server.master->flags & CLIENT_PRE_PSYNC))
         replicationSendAck();

@@ -810,7 +810,7 @@ typedef struct redisDb {
     long long avg_ttl;          /* Average TTL, just for stats */
     //过期指针
     unsigned long expires_cursor; /* Cursor of the active expire cycle. */
-    //即将整理的键名称,用一个list保存
+    //即将整理碎片的键名称,用一个list保存
     list *defrag_later;         /* List of key names to attempt to defrag one by one, gradually. */
 } redisDb;
 
@@ -1322,7 +1322,7 @@ struct redisServer {
     /* General */
     //主进程pid
     pid_t pid;                  /* Main process pid. */
-    //住线程id
+    //主线程id
     pthread_t main_thread_id;         /* Main thread id */
     // 配置文件的绝对路径
     char *configfile;           /* Absolute config file path, or NULL */
@@ -1475,6 +1475,7 @@ struct redisServer {
     redisAtomic long long stat_total_writes_processed; /* Total number of write events processed */
     /* The following two are used to track instantaneous metrics, like
      * number of operations per second, network traffic. */
+    //抽样记录服务器每秒执行的命令数量
     struct {
         long long last_sample_time; /* Timestamp of last sample in ms */
         long long last_sample_count;/* Count in last sample */
@@ -1498,6 +1499,7 @@ struct redisServer {
     int active_defrag_cycle_max;       /* maximal effort for defrag in CPU percentage */
     unsigned long active_defrag_max_scan_fields; /* maximum number of fields of set/hash/zset/list to process from within the main dict scan */
     size_t client_max_querybuf_len; /* Limit for client query buffer length */
+    //数据库数量
     int dbnum;                      /* Total number of configured DBs */
     int supervised;                 /* 1 if supervised, 0 otherwise. */
     int supervised_mode;            /* See SUPERVISED_* */
@@ -1701,10 +1703,13 @@ struct redisServer {
     int list_max_ziplist_size;
     int list_compress_depth;
     /* time cache */
+    //保存秒级精度的系统当前UNIX时间戳
     redisAtomic time_t unixtime; /* Unix time sampled every cron cycle. */
     time_t timezone;            /* Cached timezone. As set by tzset(). */
     int daylight_active;        /* Currently in daylight saving time. */
+    //毫秒级精度的当前时间戳
     mstime_t mstime;            /* 'unixtime' in milliseconds. */
+    //微秒级精度的当前时间戳
     ustime_t ustime;            /* 'unixtime' in microseconds. */
     size_t blocking_op_nesting; /* Nesting level of blocking operation, used to reset blocked_last_cron. */
     long long blocked_last_cron; /* Indicate the mstime of the last time we did cron jobs from a blocking operation */
@@ -1904,11 +1909,15 @@ struct redisCommand {
     //命令名称
     /* Declarative data */
     char *name;
-    //实现函数
+    //函数指针,指向实现函数
     redisCommandProc *proc;
-    //参数个数
+    //参数个数,用于检查命令请求的格式是否正确
+    //如果这个值为负数 -N, 那么表示参数的数量大于等于 N
+    //命令的名字本身也是一个参数,如SET等
     int arity;
-    //字符串表示的flag,一个char代表一个flag
+    //字符串表示的flag,一个char代表一个flag,记录了命令的属性， 比如这个
+    //命令是写命令还是读命令， 这个命令是否允许在载人数据时使
+    //用， 这个命令是否允许在 Lua 脚本中使用等
     char *sflags;   /* Flags as string representation, one char per flag. */
     keySpec key_specs_static[STATIC_KEY_SPECS_NUM];
     /* Use a function to determine keys arguments in a command line.
@@ -1917,8 +1926,14 @@ struct redisCommand {
 
     /* Runtime data */
     //运行时的数据
+    //对 sflags 标识进行分析得出的二进制标识， 由程序自动生
+    //成。 服务器对命令标识进行检査时使用的都是 flags 属性而不
+    //是 sflags 属性,因为二进制操作更方便
     uint64_t flags; /* The actual flags, obtained from the 'sflags' field. */
     /* What keys should be loaded in background when calling this command? */
+    //calls表示执行了多少次
+    //milliseconds表示执行命令耗费的时间
+    //另外两个表示的是执行失败或者拒绝的命令
     long long microseconds, calls, rejected_calls, failed_calls;
     int id;     /* Command ID. This is a progressive ID starting from 0 that
                    is assigned at runtime, and is used in order to check
