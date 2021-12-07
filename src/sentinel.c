@@ -2460,6 +2460,7 @@ void sentinelReconnectInstance(sentinelRedisInstance *ri) {
                 link->cc->errstr);
             instanceLinkCloseConnection(link,link->cc);
         } else {
+            //成功建立连接
             link->pending_commands = 0;
             link->cc_conn_time = mstime();
             link->cc->data = link;

@@ -133,16 +133,26 @@ int clientSubscriptionsCount(client *c) {
 
 /* Subscribe a client to a channel. Returns 1 if the operation succeeded, or
  * 0 if the client was already subscribed to that channel. */
+/**
+ * 为客户端订阅频道。
+ * 操作成功，则返回1；
+ * 如果客户端已订阅该通道，则返回0
+ */
 int pubsubSubscribeChannel(client *c, robj *channel) {
     dictEntry *de;
     list *clients = NULL;
     int retval = 0;
 
     /* Add the channel to the client -> channels hash table */
+    /**
+     * 将channel记录到client.pubsub_channels 哈希表
+     * dictAdd函数保证了如果channel已经存在pubsub_channels哈希表中，将不会重复添加
+     */
     if (dictAdd(c->pubsub_channels,channel,NULL) == DICT_OK) {
         retval = 1;
         incrRefCount(channel);
         /* Add the client to the channel -> list of clients hash table */
+        //订阅channel的客户端列表
         de = dictFind(server.pubsub_channels,channel);
         if (de == NULL) {
             clients = listCreate();
@@ -154,23 +164,30 @@ int pubsubSubscribeChannel(client *c, robj *channel) {
         listAddNodeTail(clients,c);
     }
     /* Notify the client */
+    //通知客户端
     addReplyPubsubSubscribed(c,channel);
     return retval;
 }
 
 /* Unsubscribe a client from a channel. Returns 1 if the operation succeeded, or
  * 0 if the client was not subscribed to the specified channel. */
+/**
+ * 从频道取消订阅客户端。如果操作成功，则返回1；如果客户端未订阅指定channel，则返回0。
+ */
 int pubsubUnsubscribeChannel(client *c, robj *channel, int notify) {
     dictEntry *de;
     list *clients;
     listNode *ln;
     int retval = 0;
-
+    // 从client->pubsub_channels 哈希表中移除从channel
     /* Remove the channel from the client -> channels hash table */
+    //引用计数为啥要+1:channel可能只是指向哈希表中相同对象的指针,引用计数+1保护它
     incrRefCount(channel); /* channel may be just a pointer to the same object
                             we have in the hash tables. Protect it... */
+    //dictDelete 从client->pubsub_channels 哈希表中移除此channel
     if (dictDelete(c->pubsub_channels,channel) == DICT_OK) {
         retval = 1;
+        //从server->pubsub_channels 哈字典中移除此channel
         /* Remove the client from the channel -> clients list hash table */
         de = dictFind(server.pubsub_channels,channel);
         serverAssertWithInfo(c,NULL,de != NULL);
@@ -178,6 +195,7 @@ int pubsubUnsubscribeChannel(client *c, robj *channel, int notify) {
         ln = listSearchKey(clients,c);
         serverAssertWithInfo(c,NULL,ln != NULL);
         listDelNode(clients,ln);
+        //如果没有订阅此channel的客户端，就删除server.pubsub_channels的channel键
         if (listLength(clients) == 0) {
             /* Free the list and associated hash entry at all if this was
              * the latest client, so that it will be possible to abuse
@@ -185,6 +203,7 @@ int pubsubUnsubscribeChannel(client *c, robj *channel, int notify) {
             dictDelete(server.pubsub_channels,channel);
         }
     }
+    //告知客户端
     /* Notify the client */
     if (notify) addReplyPubsubUnsubscribed(c,channel);
     decrRefCount(channel); /* it is finally safe to release it */
@@ -216,7 +235,7 @@ int pubsubSubscribePattern(client *c, robj *pattern) {
     addReplyPubsubPatSubscribed(c,pattern);
     return retval;
 }
-
+//取消订阅模式
 /* Unsubscribe a client from a channel. Returns 1 if the operation succeeded, or
  * 0 if the client was not subscribed to the specified channel. */
 int pubsubUnsubscribePattern(client *c, robj *pattern, int notify) {
@@ -224,14 +243,17 @@ int pubsubUnsubscribePattern(client *c, robj *pattern, int notify) {
     list *clients;
     listNode *ln;
     int retval = 0;
-
+    //如果是重复的就不能直接移除
     incrRefCount(pattern); /* Protect the object. May be the same we remove */
+    //在客户端pubsub_patterns属性中查找对应的pattern
     if ((ln = listSearchKey(c->pubsub_patterns,pattern)) != NULL) {
         retval = 1;
         listDelNode(c->pubsub_patterns,ln);
         /* Remove the client from the pattern -> clients list hash table */
+        //在server的pubsub_patterns字典中删除对应的pattern
         de = dictFind(server.pubsub_patterns,pattern);
         serverAssertWithInfo(c,NULL,de != NULL);
+        //在client的pubsub_patterns列表中删除对应的pattern
         clients = dictGetVal(de);
         ln = listSearchKey(clients,c);
         serverAssertWithInfo(c,NULL,ln != NULL);
@@ -284,7 +306,7 @@ int pubsubUnsubscribeAllPatterns(client *c, int notify) {
     if (notify && count == 0) addReplyPubsubPatUnsubscribed(c,NULL);
     return count;
 }
-
+//在对应的channel发送一条消息
 /* Publish a message */
 int pubsubPublishMessage(robj *channel, robj *message) {
     int receivers = 0;
@@ -294,6 +316,7 @@ int pubsubPublishMessage(robj *channel, robj *message) {
     listIter li;
 
     /* Send to clients listening for that channel */
+    /* 从server.pubsub_channels查找channel。没有找到说明没有客户端订阅该channel */
     de = dictFind(server.pubsub_channels,channel);
     if (de) {
         list *list = dictGetVal(de);
@@ -301,6 +324,7 @@ int pubsubPublishMessage(robj *channel, robj *message) {
         listIter li;
 
         listRewind(list,&li);
+        //对channel的所有订阅者发送消息,所以需要遍历订阅者
         while ((ln = listNext(&li)) != NULL) {
             client *c = ln->value;
             addReplyPubsubMessage(c,channel,message);
@@ -308,9 +332,11 @@ int pubsubPublishMessage(robj *channel, robj *message) {
         }
     }
     /* Send to clients listening to matching channels */
+    //对所有的订阅者发送消息
     di = dictGetIterator(server.pubsub_patterns);
     if (di) {
         channel = getDecodedObject(channel);
+        //对于所有的模式订阅也要发送消息
         while((de = dictNext(di)) != NULL) {
             robj *pattern = dictGetKey(de);
             list *clients = dictGetVal(de);
@@ -429,7 +455,9 @@ NULL
     } else if (!strcasecmp(c->argv[1]->ptr,"channels") &&
         (c->argc == 2 || c->argc == 3))
     {
+        //处理channels命令
         /* PUBSUB CHANNELS [<pattern>] */
+        //获取当前被订阅的channel，pattern选项返回被订阅的和pattern模式匹配的频道
         sds pat = (c->argc == 2) ? NULL : c->argv[2]->ptr;
         dictIterator *di = dictGetIterator(server.pubsub_channels);
         dictEntry *de;
@@ -437,10 +465,11 @@ NULL
         void *replylen;
 
         replylen = addReplyDeferredLen(c);
+        //对server.pubsub_channels 字典遍历
         while((de = dictNext(di)) != NULL) {
             robj *cobj = dictGetKey(de);
             sds channel = cobj->ptr;
-
+            //匹配pattern参数的channel
             if (!pat || stringmatchlen(pat, sdslen(pat),
                                        channel, sdslen(channel),0))
             {
@@ -451,7 +480,9 @@ NULL
         dictReleaseIterator(di);
         setDeferredArrayLen(c,replylen,mblen);
     } else if (!strcasecmp(c->argv[1]->ptr,"numsub") && c->argc >= 2) {
+        //处理numsub命令
         /* PUBSUB NUMSUB [Channel_1 ... Channel_N] */
+        //对于指定channel(也可以不指定)返回对应的订阅者数量
         int j;
 
         addReplyArrayLen(c,(c->argc-2)*2);
@@ -463,6 +494,7 @@ NULL
         }
     } else if (!strcasecmp(c->argv[1]->ptr,"numpat") && c->argc == 2) {
         /* PUBSUB NUMPAT */
+        //当前被订阅的模式的数量
         addReplyLongLong(c,dictSize(server.pubsub_patterns));
     } else {
         addReplySubcommandSyntaxError(c);
